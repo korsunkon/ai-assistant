@@ -1,0 +1,257 @@
+import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  Table,
+  Card,
+  Typography,
+  Button,
+  Space,
+  message,
+  Tag,
+  Spin,
+  Descriptions,
+  Modal,
+  Timeline,
+  Divider,
+} from "antd";
+import { DownloadOutlined, ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
+import { api } from "../api/client";
+
+const { Title } = Typography;
+
+export const AnalysisResultsPage: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [analysisInfo, setAnalysisInfo] = useState<any>(null);
+  const [transcriptModalVisible, setTranscriptModalVisible] = useState(false);
+  const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      loadResults();
+      loadAnalysisInfo();
+    }
+  }, [id]);
+
+  const loadAnalysisInfo = async () => {
+    if (!id) return;
+    try {
+      const data = await api.getAnalysisStatus(parseInt(id));
+      setAnalysisInfo(data);
+    } catch (error) {
+      console.error("Ошибка загрузки информации об исследовании");
+    }
+  };
+
+  const loadResults = async () => {
+    if (!id) return;
+    try {
+      const data = await api.getAnalysisResults(parseInt(id));
+      setResults(data);
+      setLoading(false);
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || "Ошибка загрузки результатов");
+      setLoading(false);
+    }
+  };
+
+  const showTranscript = async (callId: number) => {
+    setLoadingTranscript(true);
+    setTranscriptModalVisible(true);
+    try {
+      const transcript = await api.getCallTranscript(callId);
+      setSelectedTranscript(transcript);
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || "Ошибка загрузки транскрипта");
+      setTranscriptModalVisible(false);
+    } finally {
+      setLoadingTranscript(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const exportToCSV = () => {
+    if (results.length === 0) {
+      message.warning("Нет данных для экспорта");
+      return;
+    }
+
+    const headers = ["Файл", "Краткая выжимка"];
+    const rows = results.map((r) => [
+      r.filename || "",
+      r.summary || "",
+    ]);
+
+    const csvContent =
+      headers.join(",") +
+      "\n" +
+      rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `analysis_${id}_results.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    message.success("CSV файл скачан");
+  };
+
+  const columns = [
+    {
+      title: "Название файла",
+      dataIndex: "filename",
+      key: "filename",
+    },
+    {
+      title: "Краткая выжимка",
+      dataIndex: "summary",
+      key: "summary",
+      ellipsis: true,
+    },
+    {
+      title: "Детали",
+      key: "details",
+      render: (_: any, record: any) => {
+        try {
+          const jsonData = JSON.parse(record.json_result || "{}");
+          const findings = jsonData.findings || [];
+          return (
+            <Space direction="vertical" size="small">
+              {findings.slice(0, 3).map((f: any, idx: number) => (
+                <Tag key={idx}>
+                  {f.criterion}: {f.value}
+                </Tag>
+              ))}
+              {findings.length > 3 && <Tag>+{findings.length - 3} ещё</Tag>}
+            </Space>
+          );
+        } catch {
+          return <Tag>Нет данных</Tag>;
+        }
+      },
+    },
+    {
+      title: "Действия",
+      key: "actions",
+      render: (_: any, record: any) => (
+        <Button
+          icon={<FileTextOutlined />}
+          onClick={() => showTranscript(record.call_id)}
+          size="small"
+        >
+          Транскрипт
+        </Button>
+      ),
+    },
+  ];
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: 50 }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Space direction="vertical" style={{ width: "100%" }} size="large">
+        <div>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/analysis/new")} style={{ marginBottom: 16 }}>
+            Назад
+          </Button>
+          <Title level={2}>Результаты исследования</Title>
+          {analysisInfo && (
+            <Descriptions bordered style={{ marginBottom: 24 }}>
+              <Descriptions.Item label="Статус">
+                <Tag color={analysisInfo.status === "completed" ? "green" : "blue"}>
+                  {analysisInfo.status === "completed" ? "Завершено" : analysisInfo.status}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Прогресс">
+                {analysisInfo.progress}%
+              </Descriptions.Item>
+              <Descriptions.Item label="Обработано звонков">
+                {analysisInfo.processed_calls} / {analysisInfo.total_calls}
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+        </div>
+
+        <Card
+          title={`Результаты (${results.length} звонков)`}
+          extra={
+            <Button icon={<DownloadOutlined />} onClick={exportToCSV}>
+              Экспорт CSV
+            </Button>
+          }
+        >
+          <Table
+            columns={columns}
+            dataSource={results}
+            rowKey="id"
+            pagination={{ pageSize: 20 }}
+          />
+        </Card>
+      </Space>
+
+      <Modal
+        title="Транскрипт звонка"
+        open={transcriptModalVisible}
+        onCancel={() => {
+          setTranscriptModalVisible(false);
+          setSelectedTranscript(null);
+        }}
+        footer={null}
+        width={800}
+        style={{ top: 20 }}
+      >
+        {loadingTranscript ? (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        ) : selectedTranscript ? (
+          <div>
+            <Card size="small" style={{ marginBottom: 16, backgroundColor: "#f5f5f5" }}>
+              <Typography.Paragraph strong>Полный текст:</Typography.Paragraph>
+              <Typography.Paragraph>{selectedTranscript.text}</Typography.Paragraph>
+            </Card>
+
+            <Divider>Детальная транскрипция с временными метками</Divider>
+
+            <Timeline
+              items={selectedTranscript.segments?.map((segment: any, idx: number) => ({
+                color: idx % 2 === 0 ? "blue" : "green",
+                children: (
+                  <div key={idx}>
+                    <Space>
+                      <Tag color="blue">{formatTime(segment.start)}</Tag>
+                      <Tag color="green">{formatTime(segment.end)}</Tag>
+                    </Space>
+                    <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
+                      {segment.text}
+                    </Typography.Paragraph>
+                  </div>
+                ),
+              }))}
+            />
+          </div>
+        ) : (
+          <Typography.Text>Нет данных</Typography.Text>
+        )}
+      </Modal>
+    </div>
+  );
+};
+
