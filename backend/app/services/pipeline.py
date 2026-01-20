@@ -10,6 +10,8 @@ from loguru import logger
 from ..config import settings
 from ..models import Call, Analysis, AnalysisResult
 from .ollama_client import OllamaClient
+from .diarization import perform_diarization, merge_transcription_with_diarization, DIARIZATION_AVAILABLE
+from .role_assignment import assign_roles_with_llm
 
 try:
     import whisper  # type: ignore
@@ -99,7 +101,7 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
             result = model.transcribe(
                 audio_array,
                 language=settings.whisper_language,
-                verbose=True,
+                verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
             )
         except ImportError:
             # Если librosa не установлен, пробуем стандартный способ (требует ffmpeg)
@@ -107,7 +109,7 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
             result = model.transcribe(
                 str(audio_path.absolute()),
                 language=settings.whisper_language,
-                verbose=True,
+                verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
             )
         
         logger.info(f"Транскрибация завершена для звонка {call.id}")
@@ -130,11 +132,85 @@ def save_transcript(call: Call, transcript: Dict[str, Any]) -> Path:
     return out_path
 
 
+def perform_diarization_and_role_assignment(
+    call: Call,
+    transcript: Dict[str, Any],
+    audio_path: Path
+) -> Dict[str, Any]:
+    """
+    Выполняет полноценную диаризацию и определение ролей.
+
+    Этапы:
+    1. Диаризация аудио (определение кто и когда говорил)
+    2. Объединение транскрипции с диаризацией
+    3. Определение ролей через Qwen (Клиент/Сотрудник/etc)
+
+    Args:
+        call: Объект звонка из БД
+        transcript: Результат транскрипции от Whisper
+        audio_path: Путь к аудиофайлу
+
+    Returns:
+        Транскрипт с информацией о спикерах и их ролях
+    """
+    # Проверяем, включена ли диаризация
+    if not settings.diarization_enabled:
+        logger.info("Диаризация отключена в настройках, используется fallback")
+        return simple_role_assignment(transcript)
+
+    # Проверяем доступность библиотеки
+    if not DIARIZATION_AVAILABLE:
+        logger.warning("Библиотека диаризации недоступна, используется fallback")
+        return simple_role_assignment(transcript)
+
+    try:
+        # Шаг 1: Диаризация
+        logger.info(f"Выполняю диаризацию для звонка {call.id}")
+        diarization_result = perform_diarization(
+            audio_path,
+            min_speakers=settings.min_speakers,
+            max_speakers=settings.max_speakers
+        )
+
+        logger.info(
+            f"Диаризация завершена: {diarization_result['num_speakers']} говорящих"
+        )
+
+        # Шаг 2: Объединение транскрипции с диаризацией
+        transcript_with_speakers = merge_transcription_with_diarization(
+            transcript, diarization_result
+        )
+
+        # Шаг 3: Определение ролей через LLM
+        if settings.role_assignment_enabled:
+            logger.info("Определяю роли говорящих через Qwen")
+            transcript_with_roles = assign_roles_with_llm(transcript_with_speakers)
+        else:
+            logger.info("Определение ролей отключено, используются SPEAKER_XX")
+            # Добавляем базовые роли (просто повторяем speaker)
+            segments = []
+            for seg in transcript_with_speakers.get("segments", []):
+                segments.append({
+                    **seg,
+                    "role": seg.get("speaker", "Unknown")
+                })
+            transcript_with_roles = {
+                **transcript_with_speakers,
+                "segments": segments
+            }
+
+        return transcript_with_roles
+
+    except Exception as e:
+        logger.error(f"Ошибка при диаризации/определении ролей: {e}")
+        logger.info("Используем fallback режим")
+        return simple_role_assignment(transcript)
+
+
 def simple_role_assignment(transcript: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Упрощённая \"диаризация\" и назначение ролей.
-    На MVP мы считаем, что весь текст — один диалог без чётких границ спикеров.
-    Возвращаем структуру с одним сегментом и ролями Клиент/Сотрудник по эвристике.
+    Fallback: Упрощённое назначение ролей без диаризации.
+    Используется если диаризация недоступна или отключена.
     """
     text = transcript.get("text", "") or ""
     segments = transcript.get("segments") or []
@@ -143,17 +219,22 @@ def simple_role_assignment(transcript: Dict[str, Any]) -> Dict[str, Any]:
     if segments and not text:
         text = " ".join(seg.get("text", "") for seg in segments)
 
-    # Для MVP просто считаем, что первый говорящий — сотрудник, второй — клиент,
-    # но без настоящего деления на сегменты это в основном заглушка.
+    # Простая заглушка: все реплики от одного "Сотрудника"
     return {
+        "text": text,
         "segments": [
             {
                 "start": 0.0,
                 "end": transcript.get("duration", 0.0),
-                "speaker": "Сотрудник",
+                "speaker": "SPEAKER_00",
+                "speaker_id": 0,
+                "role": "Сотрудник",
                 "text": text,
             }
-        ]
+        ],
+        "speakers": ["SPEAKER_00"],
+        "num_speakers": 1,
+        "speaker_roles": {"SPEAKER_00": "Сотрудник"}
     }
 
 
@@ -218,25 +299,48 @@ def run_analysis_for_call(
 ) -> None:
     """
     Полный цикл обработки одного звонка в рамках исследования.
+
+    Включает:
+    1. Транскрибацию (Whisper)
+    2. Диаризацию (pyannote.audio)
+    3. Определение ролей (Qwen)
+    4. LLM-анализ (Qwen)
     """
     logger.info(f"Начинаю обработку звонка {call.id} для исследования {analysis.id}")
-    
+
     try:
         # Обновляем статус на "processing"
         call.status = "processing"
         db.commit()
-        
+
+        # Определяем путь к аудиофайлу (нужен для диаризации)
+        audio_path = Path(call.original_path)
+        if not audio_path.is_absolute() or not audio_path.exists():
+            audio_dir = settings.data_root / settings.audio_dir_name
+            audio_path = audio_dir / call.filename
+            if not audio_path.exists():
+                raise FileNotFoundError(f"Аудиофайл не найден: {audio_path}")
+
         # 1. Транскрибация
+        logger.info("Этап 1/4: Транскрибация")
         transcript = transcribe_call(call)
         save_transcript(call, transcript)
 
-        # 2. Упрощённая диаризация/назначение ролей
-        transcript_with_roles = simple_role_assignment(transcript)
+        # 2. Диаризация + определение ролей
+        logger.info("Этап 2/4: Диаризация и определение ролей")
+        transcript_with_roles = perform_diarization_and_role_assignment(
+            call, transcript, audio_path
+        )
+
+        # Сохраняем обогащенный транскрипт (с ролями)
+        save_transcript(call, transcript_with_roles)
 
         # 3. LLM-анализ
+        logger.info("Этап 3/4: LLM-анализ")
         analysis_json = analyze_call_with_llm(call, transcript_with_roles, query_text)
 
         # 4. Сохранение результата
+        logger.info("Этап 4/4: Сохранение результатов")
         summary = analysis_json.get("summary") or ""
         json_str = json.dumps(analysis_json, ensure_ascii=False)
 
@@ -247,11 +351,18 @@ def run_analysis_for_call(
             json_result=json_str,
         )
         db.add(result)
-        
+
         # Обновляем статус на "processed"
         call.status = "processed"
         db.commit()
-        logger.info(f"Успешно обработан звонок {call.id}")
+        logger.info(f"✓ Успешно обработан звонок {call.id}")
+        logger.info(
+            f"  - Говорящих: {transcript_with_roles.get('num_speakers', 'N/A')}"
+        )
+        logger.info(
+            f"  - Роли: {transcript_with_roles.get('speaker_roles', {})}"
+        )
+
     except Exception as e:
         logger.error(f"Критическая ошибка при обработке звонка {call.id}: {str(e)}")
         call.status = "error"

@@ -25,11 +25,21 @@ class Settings(BaseSettings):
     # Whisper
     whisper_model_name: str = "large-v3"
     whisper_language: str | None = "ru"
-    max_concurrent_transcriptions: int = 4
+    max_concurrent_transcriptions: int = 2  # Оптимально для RTX 4090 Laptop (16GB VRAM)
+
+    # Диаризация (pyannote.audio)
+    # Можно указать:
+    # 1. Локальный путь: "./speaker-diarization-3.1" (работает без интернета и токенов)
+    # 2. HuggingFace: "pyannote/speaker-diarization-3.1" (требует HF_TOKEN)
+    diarization_model: str = "./speaker-diarization-3.1"
+    diarization_enabled: bool = True
+    min_speakers: int | None = None  # None = автоопределение
+    max_speakers: int | None = None  # None = автоопределение
 
     # LLM (Ollama)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model_name: str = "qwen3:8b"
+    role_assignment_enabled: bool = True  # Определять роли через Qwen
 
     class Config:
         env_file = ".env"

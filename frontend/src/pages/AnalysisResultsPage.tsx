@@ -223,28 +223,65 @@ export const AnalysisResultsPage: React.FC = () => {
           </div>
         ) : selectedTranscript ? (
           <div>
+            {/* Информация о диаризации */}
+            {selectedTranscript.num_speakers && selectedTranscript.num_speakers > 0 && (
+              <Card size="small" style={{ marginBottom: 16, backgroundColor: "#e6f7ff" }}>
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <div>
+                    <Typography.Text strong>Количество говорящих: </Typography.Text>
+                    <Tag color="blue">{selectedTranscript.num_speakers}</Tag>
+                  </div>
+                  {selectedTranscript.speaker_roles && Object.keys(selectedTranscript.speaker_roles).length > 0 && (
+                    <div>
+                      <Typography.Text strong>Роли участников:</Typography.Text>
+                      <div style={{ marginTop: 8 }}>
+                        {Object.entries(selectedTranscript.speaker_roles).map(([speaker, role]: [string, any]) => (
+                          <Tag key={speaker} color="gold" style={{ marginBottom: 4 }}>
+                            {speaker}: {role}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Space>
+              </Card>
+            )}
+
             <Card size="small" style={{ marginBottom: 16, backgroundColor: "#f5f5f5" }}>
               <Typography.Paragraph strong>Полный текст:</Typography.Paragraph>
               <Typography.Paragraph>{selectedTranscript.text}</Typography.Paragraph>
             </Card>
 
-            <Divider>Детальная транскрипция с временными метками</Divider>
+            <Divider>Детальная транскрипция с диаризацией</Divider>
 
             <Timeline
-              items={selectedTranscript.segments?.map((segment: any, idx: number) => ({
-                color: idx % 2 === 0 ? "blue" : "green",
-                children: (
-                  <div key={idx}>
-                    <Space>
-                      <Tag color="blue">{formatTime(segment.start)}</Tag>
-                      <Tag color="green">{formatTime(segment.end)}</Tag>
-                    </Space>
-                    <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
-                      {segment.text}
-                    </Typography.Paragraph>
-                  </div>
-                ),
-              }))}
+              items={selectedTranscript.segments?.map((segment: any, idx: number) => {
+                // Определяем цвет по speaker_id для визуального различия
+                const speakerColors = ["blue", "green", "orange", "purple", "cyan", "magenta"];
+                const speakerId = segment.speaker_id ?? idx % 2;
+                const timelineColor = speakerColors[speakerId % speakerColors.length];
+
+                return {
+                  color: timelineColor,
+                  children: (
+                    <div key={idx}>
+                      <Space wrap>
+                        <Tag color="blue">{formatTime(segment.start)}</Tag>
+                        <Tag color="green">{formatTime(segment.end)}</Tag>
+                        {segment.speaker && (
+                          <Tag color={timelineColor}>{segment.speaker}</Tag>
+                        )}
+                        {segment.role && (
+                          <Tag color="gold">{segment.role}</Tag>
+                        )}
+                      </Space>
+                      <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
+                        {segment.text}
+                      </Typography.Paragraph>
+                    </div>
+                  ),
+                };
+              })}
             />
           </div>
         ) : (
