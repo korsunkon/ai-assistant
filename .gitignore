@@ -39,3 +39,8 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Models (загружаются локально, см. документацию)
+speaker-diarization-3.1/
+*.pth
+*.pt

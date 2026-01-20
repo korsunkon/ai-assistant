@@ -14,13 +14,19 @@ from .diarization import perform_diarization, merge_transcription_with_diarizati
 from .role_assignment import assign_roles_with_llm
 
 try:
-    import whisper  # type: ignore
+    from faster_whisper import WhisperModel
+    import torch
+    FASTER_WHISPER_AVAILABLE = True
+    logger.info("faster-whisper обнаружен - будет использоваться для GPU ускорения")
 except ImportError:  # pragma: no cover
+    FASTER_WHISPER_AVAILABLE = False
     try:
-        # Пробуем импортировать как openai-whisper
-        from openai_whisper import whisper  # type: ignore
+        import whisper  # type: ignore
     except ImportError:
-        whisper = None
+        try:
+            from openai_whisper import whisper  # type: ignore
+        except ImportError:
+            whisper = None
 
 _whisper_model = None
 
@@ -28,16 +34,33 @@ _whisper_model = None
 def _get_whisper_model():
     """
     Ленивая загрузка модели Whisper.
-    Если библиотека не установлена — бросаем понятную ошибку.
+    Использует faster-whisper для GPU ускорения если доступен,
+    иначе стандартный openai-whisper.
     """
     global _whisper_model
     if _whisper_model is None:
-        if whisper is None:
-            raise RuntimeError(
-                "Библиотека 'whisper' не установлена. "
-                "Добавьте её в requirements.txt и установите зависимости."
+        if FASTER_WHISPER_AVAILABLE:
+            # Используем faster-whisper с GPU
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+
+            logger.info(f"Загрузка faster-whisper модели '{settings.whisper_model_name}' на {device} (compute_type={compute_type})")
+            _whisper_model = WhisperModel(
+                settings.whisper_model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=None  # Использует кэш HuggingFace
             )
-        _whisper_model = whisper.load_model(settings.whisper_model_name)
+            logger.info(f"faster-whisper модель загружена на {device}")
+        else:
+            # Fallback на стандартный whisper
+            if whisper is None:
+                raise RuntimeError(
+                    "Библиотека 'whisper' или 'faster-whisper' не установлена. "
+                    "Добавьте её в requirements.txt и установите зависимости."
+                )
+            logger.info(f"Загрузка openai-whisper модели '{settings.whisper_model_name}'")
+            _whisper_model = whisper.load_model(settings.whisper_model_name)
     return _whisper_model
 
 
@@ -86,31 +109,68 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
     
     logger.info(f"Транскрибирую файл: {audio_path.absolute()}")
     try:
-        # Используем librosa для загрузки аудио (обход проблемы с ffmpeg на Windows)
-        try:
-            import librosa
-            import numpy as np
-            
-            # Загружаем аудио через librosa (16kHz - стандартная частота для Whisper)
-            logger.info("Загружаю аудио через librosa...")
-            audio_array, sr = librosa.load(str(audio_path.absolute()), sr=16000)
-            audio_array = audio_array.astype(np.float32)
-            
-            # Передаём numpy array напрямую в Whisper
-            logger.info(f"Аудио загружено: {len(audio_array)} сэмплов, частота {sr} Hz")
-            result = model.transcribe(
-                audio_array,
-                language=settings.whisper_language,
-                verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
-            )
-        except ImportError:
-            # Если librosa не установлен, пробуем стандартный способ (требует ffmpeg)
-            logger.warning("librosa не установлен, используем стандартный способ (требует ffmpeg)")
-            result = model.transcribe(
+        if FASTER_WHISPER_AVAILABLE:
+            # faster-whisper использует другой API
+            logger.info("Используется faster-whisper для транскрипции")
+            segments, info = model.transcribe(
                 str(audio_path.absolute()),
                 language=settings.whisper_language,
-                verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
+                beam_size=5,
+                vad_filter=True,  # Voice Activity Detection для лучшего качества
+                vad_parameters=dict(min_silence_duration_ms=500)
             )
+
+            logger.info(f"Транскрипция: язык={info.language}, вероятность={info.language_probability:.2f}")
+
+            # Конвертируем в формат совместимый с openai-whisper
+            result_segments = []
+            full_text = []
+
+            for segment in segments:
+                result_segments.append({
+                    "id": segment.id,
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text,
+                    "tokens": segment.tokens,
+                    "temperature": segment.temperature,
+                    "avg_logprob": segment.avg_logprob,
+                    "compression_ratio": segment.compression_ratio,
+                    "no_speech_prob": segment.no_speech_prob
+                })
+                full_text.append(segment.text)
+
+            result = {
+                "text": " ".join(full_text),
+                "segments": result_segments,
+                "language": info.language
+            }
+        else:
+            # Используем librosa для загрузки аудио (обход проблемы с ffmpeg на Windows)
+            try:
+                import librosa
+                import numpy as np
+
+                # Загружаем аудио через librosa (16kHz - стандартная частота для Whisper)
+                logger.info("Загружаю аудио через librosa...")
+                audio_array, sr = librosa.load(str(audio_path.absolute()), sr=16000)
+                audio_array = audio_array.astype(np.float32)
+
+                # Передаём numpy array напрямую в Whisper
+                logger.info(f"Аудио загружено: {len(audio_array)} сэмплов, частота {sr} Hz")
+                result = model.transcribe(
+                    audio_array,
+                    language=settings.whisper_language,
+                    verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
+                )
+            except ImportError:
+                # Если librosa не установлен, пробуем стандартный способ (требует ffmpeg)
+                logger.warning("librosa не установлен, используем стандартный способ (требует ffmpeg)")
+                result = model.transcribe(
+                    str(audio_path.absolute()),
+                    language=settings.whisper_language,
+                    verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
+                )
         
         logger.info(f"Транскрибация завершена для звонка {call.id}")
         return result
