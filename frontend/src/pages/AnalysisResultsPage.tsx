@@ -112,16 +112,19 @@ export const AnalysisResultsPage: React.FC = () => {
       title: "Название файла",
       dataIndex: "filename",
       key: "filename",
+      width: 250,
     },
     {
       title: "Краткая выжимка",
       dataIndex: "summary",
       key: "summary",
       ellipsis: true,
+      width: 300,
     },
     {
       title: "Детали",
       key: "details",
+      width: 300,
       render: (_: any, record: any) => {
         try {
           const jsonData = JSON.parse(record.json_result || "{}");
@@ -142,15 +145,16 @@ export const AnalysisResultsPage: React.FC = () => {
       },
     },
     {
-      title: "Действия",
-      key: "actions",
+      title: "Транскрипция",
+      key: "transcript",
+      width: 150,
       render: (_: any, record: any) => (
         <Button
+          type="primary"
           icon={<FileTextOutlined />}
           onClick={() => showTranscript(record.call_id)}
-          size="small"
         >
-          Транскрипт
+          Открыть
         </Button>
       ),
     },
@@ -202,20 +206,22 @@ export const AnalysisResultsPage: React.FC = () => {
             dataSource={results}
             rowKey="id"
             pagination={{ pageSize: 20 }}
+            scroll={{ x: 1000 }}
           />
         </Card>
       </Space>
 
       <Modal
-        title="Транскрипт звонка"
+        title={<span><FileTextOutlined /> Транскрипция сессии</span>}
         open={transcriptModalVisible}
         onCancel={() => {
           setTranscriptModalVisible(false);
           setSelectedTranscript(null);
         }}
         footer={null}
-        width={800}
+        width={900}
         style={{ top: 20 }}
+        styles={{ body: { maxHeight: "80vh", overflowY: "auto" } }}
       >
         {loadingTranscript ? (
           <div style={{ textAlign: "center", padding: 40 }}>

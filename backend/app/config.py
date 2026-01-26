@@ -28,13 +28,14 @@ class Settings(BaseSettings):
     max_concurrent_transcriptions: int = 2  # Оптимально для RTX 4090 Laptop (16GB VRAM)
 
     # Диаризация (pyannote.audio)
-    # Можно указать:
-    # 1. Локальный путь: "./speaker-diarization-3.1" (работает без интернета и токенов)
-    # 2. HuggingFace: "pyannote/speaker-diarization-3.1" (требует HF_TOKEN)
-    diarization_model: str = "./speaker-diarization-3.1"
+    # Модель загружается с HuggingFace и кэшируется локально.
+    # При первом запуске требуется HF_TOKEN (установите в .env файле)
+    # После загрузки модель кэшируется и токен больше не нужен.
+    diarization_model: str = "pyannote/speaker-diarization-3.1"
     diarization_enabled: bool = True
     min_speakers: int | None = None  # None = автоопределение
     max_speakers: int | None = None  # None = автоопределение
+    hf_token: str | None = None  # HuggingFace токен для загрузки моделей
 
     # LLM (Ollama)
     ollama_base_url: str = "http://localhost:11434"

@@ -25,9 +25,8 @@ def _get_diarization_pipeline():
     Ленивая загрузка pipeline диаризации.
     Загружается только при первом использовании.
 
-    Поддерживает два режима:
-    1. Локальная модель (если settings.diarization_model - путь к папке)
-    2. Загрузка с HuggingFace (требует токен только при первой загрузке)
+    Загрузка с HuggingFace с кэшированием - токен нужен только при первой загрузке.
+    После этого модель кэшируется локально и токен не требуется.
     """
     global _diarization_pipeline
 
@@ -38,26 +37,25 @@ def _get_diarization_pipeline():
                 "Установите: pip install pyannote.audio torch torchaudio"
             )
 
-        logger.info(f"Загружаю модель диаризации: {settings.diarization_model}")
+        import os
 
-        # Проверяем, является ли model_name локальным путем
-        model_path = Path(settings.diarization_model)
-        is_local = model_path.exists() and model_path.is_dir()
+        # Получаем токен: сначала из settings (.env файл), потом из переменных окружения
+        hf_token = settings.hf_token or os.environ.get('HF_TOKEN') or os.environ.get('HUGGINGFACE_TOKEN')
+
+        model_name = settings.diarization_model
+        # Если указан локальный путь, используем стандартное имя модели
+        if model_name.startswith('./') or model_name.startswith('/') or '\\' in model_name:
+            model_name = "pyannote/speaker-diarization-3.1"
+            logger.info(f"Локальный путь не поддерживается в pyannote 3.1, используем HuggingFace: {model_name}")
+
+        logger.info(f"Загружаю модель диаризации: {model_name}")
 
         try:
-            if is_local:
-                # Загружаем из локальной папки (не требует токен)
-                logger.info(f"Загрузка локальной модели из: {model_path.absolute()}")
-                _diarization_pipeline = Pipeline.from_pretrained(
-                    str(model_path.absolute())
-                )
-            else:
-                # Загружаем с HuggingFace (требует токен)
-                logger.info("Загрузка модели с HuggingFace (требуется токен)")
-                _diarization_pipeline = Pipeline.from_pretrained(
-                    settings.diarization_model,
-                    use_auth_token=True  # Использует токен из HF_TOKEN env var
-                )
+            # Загружаем с HuggingFace (модель кэшируется после первой загрузки)
+            _diarization_pipeline = Pipeline.from_pretrained(
+                model_name,
+                use_auth_token=hf_token  # None если токен не установлен - попробует из кэша
+            )
 
             # Переносим на GPU если доступен
             if torch.cuda.is_available():
@@ -68,24 +66,22 @@ def _get_diarization_pipeline():
 
         except Exception as e:
             logger.error(f"Ошибка загрузки модели диаризации: {e}")
-
-            if not is_local:
-                logger.info(
-                    "РЕШЕНИЕ 1 (Рекомендуется): Скачать модель локально один раз\n"
-                    "-----------------------------------------------------------\n"
-                    "1. Установите git-lfs: https://git-lfs.github.com/\n"
-                    "2. Клонируйте модель:\n"
-                    "   git clone https://huggingface.co/pyannote/speaker-diarization-3.1\n"
-                    "3. В config.py укажите путь к папке:\n"
-                    "   diarization_model = './speaker-diarization-3.1'\n"
-                    "4. После этого токен не нужен!\n\n"
-                    "РЕШЕНИЕ 2: Использовать HuggingFace токен\n"
-                    "-------------------------------------------\n"
-                    "1. Зарегистрируйтесь: https://huggingface.co\n"
-                    "2. Создайте токен: https://huggingface.co/settings/tokens\n"
-                    "3. Примите условия: https://huggingface.co/pyannote/speaker-diarization-3.1\n"
-                    "4. Установите: set HF_TOKEN=your_token"
-                )
+            logger.info(
+                "\n" + "="*60 + "\n"
+                "ТРЕБУЕТСЯ HUGGINGFACE ТОКЕН ДЛЯ ДИАРИЗАЦИИ\n"
+                "="*60 + "\n\n"
+                "Для работы диаризации нужен токен HuggingFace (один раз для загрузки):\n\n"
+                "1. Зарегистрируйтесь на https://huggingface.co\n"
+                "2. Создайте токен: https://huggingface.co/settings/tokens\n"
+                "3. Примите условия использования моделей:\n"
+                "   - https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+                "   - https://huggingface.co/pyannote/segmentation-3.0\n"
+                "4. Установите токен:\n"
+                "   Windows: set HF_TOKEN=hf_ваш_токен\n"
+                "   Linux/Mac: export HF_TOKEN=hf_ваш_токен\n\n"
+                "После первой загрузки модели кэшируются и токен больше не нужен!\n"
+                "="*60
+            )
             raise
 
     return _diarization_pipeline
