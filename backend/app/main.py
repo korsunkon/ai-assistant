@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from .config import ensure_data_dirs
-from .db import engine, Base
-from .routes import calls, analysis
+from .db import engine, Base, SessionLocal
+from .routes import calls, analysis, templates
 
 # Настройка логирования
 logger.add("logs/app.log", rotation="10 MB", retention="7 days", level="INFO")
@@ -32,6 +32,15 @@ def create_app() -> FastAPI:
 
     app.include_router(calls.router)
     app.include_router(analysis.router)
+    app.include_router(templates.router)
+
+    # Инициализация системных шаблонов
+    db = SessionLocal()
+    try:
+        templates.init_system_templates(db)
+        logger.info("Системные шаблоны инициализированы")
+    finally:
+        db.close()
 
     @app.get("/health")
     def healthcheck():

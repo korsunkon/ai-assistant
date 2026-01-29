@@ -63,3 +63,18 @@ class AnalysisResult(Base):
     call: Mapped[Call] = relationship(back_populates="analysis_results")
 
 
+class AnalysisTemplate(Base):
+    """Предустановленные шаблоны анализа"""
+    __tablename__ = "analysis_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String, default="general", nullable=False)
+    is_system: Mapped[bool] = mapped_column(Integer, default=False, nullable=False)  # SQLite не поддерживает Boolean
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+

@@ -251,3 +251,82 @@ def get_analysis_results(
     return out
 
 
+@router.get("/{analysis_id}/dashboard")
+def get_analysis_dashboard(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Возвращает агрегированную статистику для Dashboard.
+    Специально оптимизирован для анализа инцидентов (агрессия, конфликты).
+    """
+    import json as json_lib
+
+    analysis = db.get(Analysis, analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Исследование не найдено")
+
+    results = (
+        db.query(AnalysisResult, Call)
+        .join(Call, AnalysisResult.call_id == Call.id)
+        .filter(AnalysisResult.analysis_id == analysis_id)
+        .all()
+    )
+
+    total_files = len(results)
+    files_with_incidents = 0
+    total_incidents = 0
+    incidents_by_type = {}
+    severity_distribution = {"none": 0, "low": 0, "medium": 0, "high": 0}
+    all_incidents = []
+
+    for result, call in results:
+        try:
+            data = json_lib.loads(result.json_result or "{}")
+        except:
+            data = {}
+
+        # Проверяем наличие инцидентов в разных форматах
+        incidents = data.get("incidents", [])
+        has_incidents = data.get("has_incidents", len(incidents) > 0)
+        overall_severity = data.get("overall_severity", "none")
+
+        if has_incidents and incidents:
+            files_with_incidents += 1
+
+        severity_distribution[overall_severity] = severity_distribution.get(overall_severity, 0) + 1
+
+        for incident in incidents:
+            total_incidents += 1
+            inc_type = incident.get("type", "unknown")
+            incidents_by_type[inc_type] = incidents_by_type.get(inc_type, 0) + 1
+
+            all_incidents.append({
+                "file_id": call.id,
+                "filename": call.filename,
+                "start_time": incident.get("start_time", 0),
+                "end_time": incident.get("end_time", 0),
+                "type": inc_type,
+                "severity": incident.get("severity", "unknown"),
+                "description": incident.get("description", ""),
+                "quote": incident.get("quote", ""),
+            })
+
+    # Сортируем инциденты по severity (high -> medium -> low)
+    severity_order = {"high": 0, "medium": 1, "low": 2, "unknown": 3}
+    all_incidents.sort(key=lambda x: severity_order.get(x["severity"], 3))
+
+    return {
+        "analysis_id": analysis.id,
+        "analysis_name": analysis.name,
+        "stats": {
+            "total_files": total_files,
+            "files_with_incidents": files_with_incidents,
+            "total_incidents": total_incidents,
+            "incidents_by_type": incidents_by_type,
+            "severity_distribution": severity_distribution,
+        },
+        "incidents": all_incidents,
+    }
+
+

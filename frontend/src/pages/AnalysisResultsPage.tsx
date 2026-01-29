@@ -14,7 +14,7 @@ import {
   Timeline,
   Divider,
 } from "antd";
-import { DownloadOutlined, ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
+import { DownloadOutlined, ArrowLeftOutlined, FileTextOutlined, DashboardOutlined } from "@ant-design/icons";
 import { api } from "../api/client";
 
 const { Title } = Typography;
@@ -28,6 +28,7 @@ export const AnalysisResultsPage: React.FC = () => {
   const [transcriptModalVisible, setTranscriptModalVisible] = useState(false);
   const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
+  const [exportingCSV, setExportingCSV] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -78,33 +79,85 @@ export const AnalysisResultsPage: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const exportToCSV = () => {
+  // Форматирование транскрипта с тайм-кодами для CSV
+  const formatTranscriptForCSV = (transcript: any): string => {
+    if (!transcript || !transcript.segments || transcript.segments.length === 0) {
+      return transcript?.text || "";
+    }
+
+    return transcript.segments
+      .map((segment: any) => {
+        const time = formatTime(segment.start);
+        const speaker = segment.role || segment.speaker || "Спикер";
+        const text = segment.text || "";
+        return `[${time}] ${speaker}: ${text}`;
+      })
+      .join("\n");
+  };
+
+  const exportToCSV = async () => {
     if (results.length === 0) {
       message.warning("Нет данных для экспорта");
       return;
     }
 
-    const headers = ["Файл", "Краткая выжимка"];
-    const rows = results.map((r) => [
-      r.filename || "",
-      r.summary || "",
-    ]);
+    setExportingCSV(true);
+    message.loading({ content: "Загрузка транскрипций...", key: "csvExport", duration: 0 });
 
-    const csvContent =
-      headers.join(",") +
-      "\n" +
-      rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    try {
+      // Загружаем транскрипции для всех файлов
+      const transcripts: Record<number, any> = {};
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `analysis_${id}_results.csv`);
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    message.success("CSV файл скачан");
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        message.loading({
+          content: `Загрузка транскрипций: ${i + 1}/${results.length}`,
+          key: "csvExport",
+          duration: 0
+        });
+
+        try {
+          const transcript = await api.getCallTranscript(result.call_id);
+          transcripts[result.call_id] = transcript;
+        } catch {
+          // Если транскрипт недоступен, оставляем пустым
+          transcripts[result.call_id] = null;
+        }
+      }
+
+      const headers = ["Файл", "Краткая выжимка", "Транскрипция"];
+      const rows = results.map((r) => [
+        r.filename || "",
+        r.summary || "",
+        formatTranscriptForCSV(transcripts[r.call_id]),
+      ]);
+
+      const csvContent =
+        "\ufeff" + // BOM для корректного отображения UTF-8 в Excel
+        headers.join(";") + // Используем ; для Excel
+        "\n" +
+        rows
+          .map((row) =>
+            row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";")
+          )
+          .join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `analysis_${id}_results.csv`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      message.success({ content: "CSV файл скачан", key: "csvExport" });
+    } catch (error) {
+      message.error({ content: "Ошибка при экспорте", key: "csvExport" });
+    } finally {
+      setExportingCSV(false);
+    }
   };
 
   const columns = [
@@ -196,9 +249,22 @@ export const AnalysisResultsPage: React.FC = () => {
         <Card
           title={`Результаты (${results.length} звонков)`}
           extra={
-            <Button icon={<DownloadOutlined />} onClick={exportToCSV}>
-              Экспорт CSV
-            </Button>
+            <Space>
+              <Button
+                type="primary"
+                icon={<DashboardOutlined />}
+                onClick={() => navigate(`/analysis/${id}/dashboard`)}
+              >
+                Dashboard
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={exportToCSV}
+                loading={exportingCSV}
+              >
+                Экспорт CSV
+              </Button>
+            </Space>
           }
         >
           <Table

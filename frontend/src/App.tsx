@@ -5,12 +5,14 @@ import {
   DatabaseOutlined,
   ExperimentOutlined,
   TableOutlined,
+  DashboardOutlined,
 } from "@ant-design/icons";
 import { CallsPage } from "./pages/CallsPage";
 import { NewAnalysisPage } from "./pages/NewAnalysisPage";
 import { AnalysisResultsPage } from "./pages/AnalysisResultsPage";
 import { AnalysisStatusPage } from "./pages/AnalysisStatusPage";
 import { AnalysesListPage } from "./pages/AnalysesListPage";
+import { DashboardPage } from "./pages/DashboardPage";
 
 const { Header, Sider, Content } = Layout;
 
@@ -68,6 +70,7 @@ const AppLayout: React.FC = () => {
             <Route path="/analysis" element={<AnalysesListPage />} />
             <Route path="/analysis/:id" element={<AnalysisResultsPage />} />
             <Route path="/analysis/:id/status" element={<AnalysisStatusPage />} />
+            <Route path="/analysis/:id/dashboard" element={<DashboardPage />} />
             <Route path="*" element={<CallsPage />} />
           </Routes>
         </Content>

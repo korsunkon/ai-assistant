@@ -47,6 +47,42 @@ export interface AnalysisStatus {
   error_count: number;
 }
 
+export interface AnalysisTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  query_text: string;
+  category: string;
+  is_system: boolean;
+  created_at: string;
+}
+
+export interface Incident {
+  file_id: number;
+  filename: string;
+  start_time: number;
+  end_time: number;
+  type: string;
+  severity: string;
+  description: string;
+  quote: string;
+}
+
+export interface DashboardStats {
+  total_files: number;
+  files_with_incidents: number;
+  total_incidents: number;
+  incidents_by_type: Record<string, number>;
+  severity_distribution: Record<string, number>;
+}
+
+export interface DashboardData {
+  analysis_id: number;
+  analysis_name: string;
+  stats: DashboardStats;
+  incidents: Incident[];
+}
+
 // API методы
 export const api = {
   // Звонки
@@ -90,6 +126,24 @@ export const api = {
 
   async listAnalyses(): Promise<Analysis[]> {
     const response = await axiosInstance.get<Analysis[]>("/analysis");
+    return response.data;
+  },
+
+  // Шаблоны
+  async getTemplates(category?: string): Promise<AnalysisTemplate[]> {
+    const params = category ? { category } : {};
+    const response = await axiosInstance.get<AnalysisTemplate[]>("/templates", { params });
+    return response.data;
+  },
+
+  async getTemplate(id: number): Promise<AnalysisTemplate> {
+    const response = await axiosInstance.get<AnalysisTemplate>(`/templates/${id}`);
+    return response.data;
+  },
+
+  // Dashboard
+  async getAnalysisDashboard(id: number): Promise<DashboardData> {
+    const response = await axiosInstance.get<DashboardData>(`/analysis/${id}/dashboard`);
     return response.data;
   },
 };

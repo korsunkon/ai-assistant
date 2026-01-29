@@ -57,3 +57,40 @@ class AnalysisResultRead(BaseModel):
     created_at: Optional[datetime] = None
 
 
+# Шаблоны анализа
+class AnalysisTemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    query_text: str
+    category: str = "general"
+
+
+class AnalysisTemplateRead(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    query_text: str
+    category: str
+    is_system: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Статистика для Dashboard
+class IncidentStats(BaseModel):
+    total_files: int
+    files_with_incidents: int
+    total_incidents: int
+    incidents_by_type: dict
+    severity_distribution: dict
+
+
+class DashboardStats(BaseModel):
+    analysis_id: int
+    analysis_name: str
+    stats: IncidentStats
+    incidents: List[dict]  # Список инцидентов с тайм-кодами
+
+
