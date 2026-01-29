@@ -21,6 +21,8 @@ import {
   FileTextOutlined,
   ExperimentOutlined,
   SafetyOutlined,
+  CheckCircleOutlined,
+  MinusCircleOutlined,
 } from "@ant-design/icons";
 import { api, AnalysisTemplate } from "../api/client";
 import type { Call } from "../api/client";
@@ -154,6 +156,14 @@ export const NewAnalysisPage: React.FC = () => {
     }
   };
 
+  // Подсчитываем статистику по транскрипциям
+  const transcriptStats = React.useMemo(() => {
+    const selectedCalls = calls.filter((c) => selectedCallIds.includes(c.id));
+    const withTranscript = selectedCalls.filter((c) => c.has_transcript).length;
+    const withoutTranscript = selectedCalls.length - withTranscript;
+    return { withTranscript, withoutTranscript, total: selectedCalls.length };
+  }, [calls, selectedCallIds]);
+
   const columns = [
     {
       title: (
@@ -178,6 +188,25 @@ export const NewAnalysisPage: React.FC = () => {
       title: "Название файла",
       dataIndex: "filename",
       key: "filename",
+    },
+    {
+      title: "Транскрипция",
+      key: "transcript",
+      width: 130,
+      render: (_: any, record: CallWithChecked) => {
+        if (record.has_transcript) {
+          return (
+            <Tag icon={<CheckCircleOutlined />} color="green">
+              Есть
+            </Tag>
+          );
+        }
+        return (
+          <Tag icon={<MinusCircleOutlined />} color="default">
+            Нет
+          </Tag>
+        );
+      },
     },
     {
       title: "Дата загрузки",
@@ -212,14 +241,36 @@ export const NewAnalysisPage: React.FC = () => {
               <Text strong>Выбрано файлов: </Text>
               <Tag color="blue">{selectedCallIds.length}</Tag>
               {selectedCallIds.length > 0 && (
-                <Button type="link" onClick={() => {
-                  setCalls(calls.map((c) => ({ ...c, checked: false })));
-                  setSelectedCallIds([]);
-                }}>
-                  Сбросить
-                </Button>
+                <>
+                  <Tag color="green" style={{ marginLeft: 8 }}>
+                    С транскрипцией: {transcriptStats.withTranscript}
+                  </Tag>
+                  {transcriptStats.withoutTranscript > 0 && (
+                    <Tag color="orange">
+                      Без транскрипции: {transcriptStats.withoutTranscript}
+                    </Tag>
+                  )}
+                  <Button type="link" onClick={() => {
+                    setCalls(calls.map((c) => ({ ...c, checked: false })));
+                    setSelectedCallIds([]);
+                  }}>
+                    Сбросить
+                  </Button>
+                </>
               )}
             </div>
+            {transcriptStats.withTranscript > 0 && transcriptStats.withoutTranscript === 0 && (
+              <Card size="small" style={{ background: "#f6ffed", borderColor: "#b7eb8f" }}>
+                <CheckCircleOutlined style={{ color: "#52c41a", marginRight: 8 }} />
+                <Text>Все выбранные файлы уже имеют транскрипцию — анализ пройдёт быстрее</Text>
+              </Card>
+            )}
+            {transcriptStats.withoutTranscript > 0 && (
+              <Card size="small" style={{ background: "#fffbe6", borderColor: "#ffe58f" }}>
+                <MinusCircleOutlined style={{ color: "#faad14", marginRight: 8 }} />
+                <Text>Для {transcriptStats.withoutTranscript} файлов будет выполнена транскрибация</Text>
+              </Card>
+            )}
             <Table
               columns={columns}
               dataSource={calls}

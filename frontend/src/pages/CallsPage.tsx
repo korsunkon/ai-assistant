@@ -1,7 +1,7 @@
 import React, { useCallback, useRef } from "react";
-import { Button, Table, Upload, message, Tag, Space, Progress, Card, Typography, Statistic, Row, Col } from "antd";
+import { Button, Table, Upload, message, Tag, Space, Progress, Card, Typography, Statistic, Row, Col, Tooltip, Popconfirm } from "antd";
 import type { UploadProps } from "antd";
-import { UploadOutlined, DeleteOutlined, FolderOpenOutlined, InboxOutlined } from "@ant-design/icons";
+import { UploadOutlined, DeleteOutlined, FolderOpenOutlined, InboxOutlined, FileTextOutlined, ReloadOutlined, CheckCircleOutlined, MinusCircleOutlined } from "@ant-design/icons";
 import { api, Call } from "../api/client";
 
 const { Title, Text } = Typography;
@@ -210,6 +210,16 @@ export const CallsPage: React.FC = () => {
     }
   };
 
+  const handleRetranscribe = async (id: number) => {
+    try {
+      await api.retranscribeCall(id);
+      message.success("Ретранскрибация запущена");
+      void loadCalls();
+    } catch {
+      message.error("Не удалось запустить ретранскрибацию");
+    }
+  };
+
   // Статистика по статусам
   const stats = React.useMemo(() => {
     const newCount = calls.filter((c) => c.status === "new").length;
@@ -385,6 +395,32 @@ export const CallsPage: React.FC = () => {
             },
           },
           {
+            title: "Транскрипция",
+            key: "transcript",
+            width: 150,
+            filters: [
+              { text: "Есть", value: true },
+              { text: "Нет", value: false },
+            ],
+            onFilter: (value, record) => record.has_transcript === value,
+            render: (_, record) => {
+              if (record.has_transcript) {
+                return (
+                  <Tooltip title={record.transcript_updated_at ? `Обновлено: ${new Date(record.transcript_updated_at).toLocaleString("ru-RU")}` : "Транскрипция есть"}>
+                    <Tag icon={<CheckCircleOutlined />} color="green">
+                      Есть
+                    </Tag>
+                  </Tooltip>
+                );
+              }
+              return (
+                <Tag icon={<MinusCircleOutlined />} color="default">
+                  Нет
+                </Tag>
+              );
+            },
+          },
+          {
             title: "Дата загрузки",
             dataIndex: "created_at",
             width: 180,
@@ -394,14 +430,32 @@ export const CallsPage: React.FC = () => {
           {
             title: "",
             key: "actions",
-            width: 80,
+            width: 120,
             render: (_, record) => (
-              <Button
-                type="text"
-                icon={<DeleteOutlined />}
-                danger
-                onClick={() => handleDelete(record.id)}
-              />
+              <Space>
+                <Tooltip title="Ретранскрибировать">
+                  <Popconfirm
+                    title="Ретранскрибировать звонок?"
+                    description="Транскрипция будет создана заново"
+                    onConfirm={() => handleRetranscribe(record.id)}
+                    okText="Да"
+                    cancelText="Нет"
+                    disabled={record.status === "processing"}
+                  >
+                    <Button
+                      type="text"
+                      icon={<ReloadOutlined />}
+                      disabled={record.status === "processing"}
+                    />
+                  </Popconfirm>
+                </Tooltip>
+                <Button
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  danger
+                  onClick={() => handleDelete(record.id)}
+                />
+              </Space>
             ),
           },
         ]}

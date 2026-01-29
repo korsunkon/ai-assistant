@@ -351,22 +351,46 @@ def analyze_call_with_llm(
     return parsed
 
 
+def load_existing_transcript(call: Call) -> Dict[str, Any] | None:
+    """
+    Загружает существующий транскрипт звонка если он есть.
+
+    Returns:
+        Транскрипт или None если файл не существует
+    """
+    transcripts_dir = settings.data_root / settings.transcripts_dir_name
+    transcript_path = transcripts_dir / f"{call.id}.json"
+
+    if transcript_path.exists():
+        try:
+            return json.loads(transcript_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить транскрипт для {call.id}: {e}")
+            return None
+    return None
+
+
 def run_analysis_for_call(
     db: Session,
     analysis: Analysis,
     call: Call,
     query_text: str,
+    force_retranscribe: bool = False,
 ) -> None:
     """
     Полный цикл обработки одного звонка в рамках исследования.
 
     Включает:
-    1. Транскрибацию (Whisper)
-    2. Диаризацию (pyannote.audio)
-    3. Определение ролей (Qwen)
+    1. Транскрибацию (Whisper) - пропускается если транскрипт уже есть
+    2. Диаризацию (pyannote.audio) - пропускается если транскрипт уже есть
+    3. Определение ролей (Qwen) - пропускается если транскрипт уже есть
     4. LLM-анализ (Qwen)
+
+    Args:
+        force_retranscribe: Если True - принудительно транскрибировать заново
     """
     logger.info(f"Начинаю обработку звонка {call.id} для исследования {analysis.id}")
+    from datetime import datetime
 
     try:
         # Обновляем статус на "processing"
@@ -381,19 +405,35 @@ def run_analysis_for_call(
             if not audio_path.exists():
                 raise FileNotFoundError(f"Аудиофайл не найден: {audio_path}")
 
-        # 1. Транскрибация
-        logger.info("Этап 1/4: Транскрибация")
-        transcript = transcribe_call(call)
-        save_transcript(call, transcript)
+        # Проверяем, есть ли уже транскрипт
+        existing_transcript = None
+        if not force_retranscribe and call.has_transcript:
+            existing_transcript = load_existing_transcript(call)
+            if existing_transcript:
+                logger.info(f"Используем существующий транскрипт для звонка {call.id}")
 
-        # 2. Диаризация + определение ролей
-        logger.info("Этап 2/4: Диаризация и определение ролей")
-        transcript_with_roles = perform_diarization_and_role_assignment(
-            call, transcript, audio_path
-        )
+        if existing_transcript:
+            # Используем существующий транскрипт
+            transcript_with_roles = existing_transcript
+            logger.info("Этапы 1-2/4: Пропущены (транскрипт уже есть)")
+        else:
+            # 1. Транскрибация
+            logger.info("Этап 1/4: Транскрибация")
+            transcript = transcribe_call(call)
+            save_transcript(call, transcript)
 
-        # Сохраняем обогащенный транскрипт (с ролями)
-        save_transcript(call, transcript_with_roles)
+            # 2. Диаризация + определение ролей
+            logger.info("Этап 2/4: Диаризация и определение ролей")
+            transcript_with_roles = perform_diarization_and_role_assignment(
+                call, transcript, audio_path
+            )
+
+            # Сохраняем обогащенный транскрипт (с ролями)
+            save_transcript(call, transcript_with_roles)
+
+            # Обновляем флаг has_transcript
+            call.has_transcript = True
+            call.transcript_updated_at = datetime.utcnow()
 
         # 3. LLM-анализ
         logger.info("Этап 3/4: LLM-анализ")

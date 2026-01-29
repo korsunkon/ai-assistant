@@ -12,6 +12,8 @@ export interface Call {
   size_bytes: number | null;
   status: string;
   created_at: string;
+  has_transcript: boolean;
+  transcript_updated_at: string | null;
 }
 
 export interface Analysis {
@@ -36,6 +38,7 @@ export interface AnalysisCreate {
   name: string;
   query_text: string;
   call_ids: number[];
+  force_retranscribe?: boolean;
 }
 
 export interface AnalysisStatus {
@@ -105,6 +108,11 @@ export const api = {
 
   async getCallTranscript(id: number): Promise<any> {
     const response = await axiosInstance.get(`/calls/${id}/transcript`);
+    return response.data;
+  },
+
+  async retranscribeCall(id: number): Promise<{ status: string; message: string }> {
+    const response = await axiosInstance.post(`/calls/${id}/retranscribe`);
     return response.data;
   },
 

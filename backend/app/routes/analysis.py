@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import Analysis, Call, AnalysisResult
 from ..schemas import (
     AnalysisCreate,
+    AnalysisCreateWithOptions,
     AnalysisRead,
     AnalysisStatus,
     AnalysisResultRead,
@@ -32,12 +33,13 @@ def list_analyses(
 
 @router.post("", response_model=AnalysisRead)
 def create_analysis(
-    payload: AnalysisCreate,
+    payload: AnalysisCreateWithOptions,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
     Создаёт новое исследование и запускает фоновую обработку выбранных звонков.
+    Поддерживает опцию force_retranscribe для принудительной ретранскрибации.
     """
     if not payload.call_ids:
         raise HTTPException(status_code=400, detail="Не выбрано ни одного звонка")
@@ -59,22 +61,25 @@ def create_analysis(
 
     # Запускаем фоновой таск
     background_tasks.add_task(
-        _run_analysis_background, analysis.id, payload.call_ids, payload.query_text
+        _run_analysis_background, analysis.id, payload.call_ids, payload.query_text, payload.force_retranscribe
     )
 
     return analysis
 
 
-def _run_analysis_background(analysis_id: int, call_ids: List[int], query_text: str):
+def _run_analysis_background(analysis_id: int, call_ids: List[int], query_text: str, force_retranscribe: bool = False):
     """
     Фоновая функция, выполняющая полный анализ набора звонков.
     Вызывается через BackgroundTasks FastAPI.
+
+    Args:
+        force_retranscribe: Если True - принудительно транскрибировать все звонки заново
     """
     # #region agent log
     import json
     log_path = r"c:\Users\korsu\Documents\EnlighterProjects\project-036\.cursor\debug.log"
     with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"analysis.py:68","message":"_run_analysis_background entry","data":{"analysis_id":analysis_id,"call_ids":call_ids,"query_text_length":len(query_text)},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"analysis.py:68","message":"_run_analysis_background entry","data":{"analysis_id":analysis_id,"call_ids":call_ids,"query_text_length":len(query_text),"force_retranscribe":force_retranscribe},"timestamp":int(__import__("time").time()*1000)}) + "\n")
     # #endregion
     from ..db import SessionLocal  # локальный импорт, чтобы избежать циклов
 
@@ -106,7 +111,7 @@ def _run_analysis_background(analysis_id: int, call_ids: List[int], query_text: 
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"analysis.py:91","message":"processing call start","data":{"call_id":call.id,"call_filename":call.filename,"call_status_before":call.status},"timestamp":int(__import__("time").time()*1000)}) + "\n")
                 # #endregion
-                run_analysis_for_call(db, analysis, call, query_text)
+                run_analysis_for_call(db, analysis, call, query_text, force_retranscribe)
                 call.status = "processed"
                 # #region agent log
                 with open(log_path, "a", encoding="utf-8") as f:

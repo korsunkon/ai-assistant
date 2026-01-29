@@ -10,6 +10,8 @@ class CallBase(BaseModel):
     duration_sec: Optional[int] = None
     size_bytes: Optional[int] = None
     status: str
+    has_transcript: bool = False
+    transcript_updated_at: Optional[datetime] = None
 
 
 class CallRead(CallBase):
@@ -18,6 +20,13 @@ class CallRead(CallBase):
 
     class Config:
         from_attributes = True
+
+
+class AnalysisCreateWithOptions(BaseModel):
+    name: str
+    query_text: str
+    call_ids: List[int]
+    force_retranscribe: bool = False  # Принудительная ретранскрибация
 
 
 class AnalysisCreate(BaseModel):

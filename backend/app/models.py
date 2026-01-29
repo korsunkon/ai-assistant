@@ -20,6 +20,12 @@ class Call(Base):
     status: Mapped[str] = mapped_column(
         String, default="new", nullable=False, index=True
     )
+    has_transcript: Mapped[bool] = mapped_column(
+        Integer, default=False, nullable=False  # SQLite не поддерживает Boolean
+    )
+    transcript_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
     analysis_results: Mapped[list["AnalysisResult"]] = relationship(
         back_populates="call", cascade="all, delete-orphan"
