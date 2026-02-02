@@ -12,6 +12,7 @@ from ..models import Call, Analysis, AnalysisResult
 from .ollama_client import OllamaClient
 from .diarization import perform_diarization, merge_transcription_with_diarization, DIARIZATION_AVAILABLE
 from .role_assignment import assign_roles_with_llm
+from .audio_preprocessing import preprocess_audio, cleanup_preprocessed_file, is_ffmpeg_available
 
 try:
     from faster_whisper import WhisperModel
@@ -64,56 +65,85 @@ def _get_whisper_model():
     return _whisper_model
 
 
-def transcribe_call(call: Call) -> Dict[str, Any]:
+def transcribe_call(call: Call, audio_path: Path | None = None) -> Dict[str, Any]:
     """
     Транскрибирует аудиофайл звонка с помощью локальной модели Whisper.
     Возвращает словарь с результатом (приближённо к формату Whisper).
+
+    Args:
+        call: Объект звонка
+        audio_path: Путь к аудиофайлу (если None - определяется автоматически)
     """
     logger.info(f"Начинаю транскрибацию звонка {call.id}: {call.filename}")
     model = _get_whisper_model()
-    
-    # Обрабатываем путь: если относительный - делаем абсолютным относительно data_root
-    audio_path = Path(call.original_path)
-    
-    # Если путь не абсолютный или файл не найден, пытаемся найти его
-    if not audio_path.is_absolute() or not audio_path.exists():
-        # Сначала пробуем разрешить относительно data_root/audio
-        audio_dir = settings.data_root / settings.audio_dir_name
-        fallback_path = audio_dir / Path(call.original_path).name
-        
-        if fallback_path.exists():
-            audio_path = fallback_path
-            logger.info(f"Найден файл по fallback пути: {audio_path.absolute()}")
-        elif audio_path.is_absolute() and not audio_path.exists():
-            # Если абсолютный путь не работает, пробуем по имени файла
-            fallback_path = audio_dir / call.filename
+
+    # Определяем путь к аудио если не передан
+    if audio_path is None:
+        audio_path = Path(call.original_path)
+
+        # Если путь не абсолютный или файл не найден, пытаемся найти его
+        if not audio_path.is_absolute() or not audio_path.exists():
+            # Сначала пробуем разрешить относительно data_root/audio
+            audio_dir = settings.data_root / settings.audio_dir_name
+            fallback_path = audio_dir / Path(call.original_path).name
+
             if fallback_path.exists():
                 audio_path = fallback_path
-                logger.info(f"Найден файл по имени: {audio_path.absolute()}")
-            else:
-                error_msg = f"Аудиофайл не найден. Оригинальный путь: {call.original_path}, Имя файла: {call.filename}, Проверенные пути: {[audio_path, fallback_path]}"
-                logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
-        elif not audio_path.is_absolute():
-            # Пробуем сделать абсолютным
-            audio_path = audio_path.absolute()
-            if not audio_path.exists():
-                # Последняя попытка - по имени файла в audio директории
-                audio_path = audio_dir / call.filename
-                if not audio_path.exists():
-                    error_msg = f"Аудиофайл не найден. Оригинальный путь: {call.original_path}, Имя файла: {call.filename}"
+                logger.info(f"Найден файл по fallback пути: {audio_path.absolute()}")
+            elif audio_path.is_absolute() and not audio_path.exists():
+                # Если абсолютный путь не работает, пробуем по имени файла
+                fallback_path = audio_dir / call.filename
+                if fallback_path.exists():
+                    audio_path = fallback_path
+                    logger.info(f"Найден файл по имени: {audio_path.absolute()}")
+                else:
+                    error_msg = f"Аудиофайл не найден. Оригинальный путь: {call.original_path}, Имя файла: {call.filename}, Проверенные пути: {[audio_path, fallback_path]}"
                     logger.error(error_msg)
                     raise FileNotFoundError(error_msg)
-    
+            elif not audio_path.is_absolute():
+                # Пробуем сделать абсолютным
+                audio_path = audio_path.absolute()
+                if not audio_path.exists():
+                    # Последняя попытка - по имени файла в audio директории
+                    audio_path = audio_dir / call.filename
+                    if not audio_path.exists():
+                        error_msg = f"Аудиофайл не найден. Оригинальный путь: {call.original_path}, Имя файла: {call.filename}"
+                        logger.error(error_msg)
+                        raise FileNotFoundError(error_msg)
+
     logger.info(f"Используемый путь к файлу: {audio_path.absolute()}")
+
+    # Предобработка аудио (нормализация, компрессия, шумоподавление)
+    preprocessed_path = None
+    transcribe_path = audio_path
+
+    if settings.audio_preprocessing_enabled and is_ffmpeg_available():
+        try:
+            logger.info("Этап предобработки: нормализация, компрессия, шумоподавление")
+            preprocessed_path = preprocess_audio(
+                audio_path,
+                normalize=settings.audio_normalize,
+                compress=settings.audio_compress,
+                denoise=settings.audio_denoise,
+                highpass=settings.audio_highpass,
+                highpass_freq=settings.audio_highpass_freq,
+            )
+            transcribe_path = preprocessed_path
+            logger.info(f"Аудио предобработано: {preprocessed_path}")
+        except Exception as e:
+            logger.warning(f"Ошибка предобработки аудио, используем оригинал: {e}")
+            preprocessed_path = None
+            transcribe_path = audio_path
+    elif settings.audio_preprocessing_enabled and not is_ffmpeg_available():
+        logger.warning("Предобработка включена, но FFmpeg не найден. Используем оригинальный файл.")
     
-    logger.info(f"Транскрибирую файл: {audio_path.absolute()}")
+    logger.info(f"Транскрибирую файл: {transcribe_path.absolute()}")
     try:
         if FASTER_WHISPER_AVAILABLE:
             # faster-whisper использует другой API
             logger.info("Используется faster-whisper для транскрипции")
             segments, info = model.transcribe(
-                str(audio_path.absolute()),
+                str(transcribe_path.absolute()),
                 language=settings.whisper_language,
                 beam_size=5,
                 vad_filter=True,  # Voice Activity Detection для лучшего качества
@@ -153,7 +183,7 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
 
                 # Загружаем аудио через librosa (16kHz - стандартная частота для Whisper)
                 logger.info("Загружаю аудио через librosa...")
-                audio_array, sr = librosa.load(str(audio_path.absolute()), sr=16000)
+                audio_array, sr = librosa.load(str(transcribe_path.absolute()), sr=16000)
                 audio_array = audio_array.astype(np.float32)
 
                 # Передаём numpy array напрямую в Whisper
@@ -167,11 +197,11 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
                 # Если librosa не установлен, пробуем стандартный способ (требует ffmpeg)
                 logger.warning("librosa не установлен, используем стандартный способ (требует ffmpeg)")
                 result = model.transcribe(
-                    str(audio_path.absolute()),
+                    str(transcribe_path.absolute()),
                     language=settings.whisper_language,
                     verbose=False,  # Отключено из-за проблем с Unicode в Windows консоли
                 )
-        
+
         logger.info(f"Транскрибация завершена для звонка {call.id}")
         return result
     except Exception as e:
@@ -179,6 +209,10 @@ def transcribe_call(call: Call) -> Dict[str, Any]:
         import traceback
         logger.error(traceback.format_exc())
         raise
+    finally:
+        # Удаляем временный обработанный файл
+        if preprocessed_path is not None:
+            cleanup_preprocessed_file(preprocessed_path)
 
 
 def save_transcript(call: Call, transcript: Dict[str, Any]) -> Path:

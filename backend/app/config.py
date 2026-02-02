@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     ollama_model_name: str = "qwen3:8b"
     role_assignment_enabled: bool = True  # Определять роли через Qwen
 
+    # Предобработка аудио (FFmpeg)
+    audio_preprocessing_enabled: bool = True  # Включить предобработку аудио
+    audio_normalize: bool = True  # Нормализация громкости (EBU R128)
+    audio_compress: bool = True  # Компрессия динамического диапазона
+    audio_denoise: bool = True  # Шумоподавление
+    audio_highpass: bool = True  # Highpass фильтр (удаление низких частот)
+    audio_highpass_freq: int = 80  # Частота среза highpass (Hz)
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
