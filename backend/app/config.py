@@ -22,10 +22,19 @@ class Settings(BaseSettings):
     # Файл базы данных SQLite
     db_path: Path = Path("data") / "app.db"
 
-    # Whisper
+    # Транскрибация
+    # Выбор движка: "whisper" или "gigaam"
+    transcription_engine: str = "gigaam"  # gigaam рекомендуется для русского языка
+
+    # Whisper настройки
     whisper_model_name: str = "large-v3"
     whisper_language: str | None = "ru"
     max_concurrent_transcriptions: int = 2  # Оптимально для RTX 4090 Laptop (16GB VRAM)
+
+    # GigaAM настройки (для русского языка)
+    # Доступные модели: v3_e2e_rnnt (рекомендуется), v3_e2e_ctc, v3_rnnt, v2_rnnt
+    gigaam_model_name: str = "v3_e2e_rnnt"
+    gigaam_chunk_duration: float = 20.0  # Длительность чанка для разбиения длинных файлов
 
     # Диаризация (pyannote.audio)
     # Модель загружается с HuggingFace и кэшируется локально.

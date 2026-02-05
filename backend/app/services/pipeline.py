@@ -13,6 +13,7 @@ from .ollama_client import OllamaClient
 from .diarization import perform_diarization, merge_transcription_with_diarization, DIARIZATION_AVAILABLE
 from .role_assignment import assign_roles_with_llm
 from .audio_preprocessing import preprocess_audio, cleanup_preprocessed_file, is_ffmpeg_available
+from .gigaam_transcription import is_gigaam_available, transcribe_full as gigaam_transcribe_full
 
 try:
     from faster_whisper import WhisperModel
@@ -30,6 +31,11 @@ except ImportError:  # pragma: no cover
             whisper = None
 
 _whisper_model = None
+
+# Проверяем доступность GigaAM
+GIGAAM_AVAILABLE = is_gigaam_available()
+if GIGAAM_AVAILABLE:
+    logger.info("GigaAM обнаружен - доступен как альтернатива Whisper для русского языка")
 
 
 def _get_whisper_model():
@@ -67,15 +73,18 @@ def _get_whisper_model():
 
 def transcribe_call(call: Call, audio_path: Path | None = None) -> Dict[str, Any]:
     """
-    Транскрибирует аудиофайл звонка с помощью локальной модели Whisper.
-    Возвращает словарь с результатом (приближённо к формату Whisper).
+    Транскрибирует аудиофайл звонка.
+
+    Использует движок в зависимости от настройки transcription_engine:
+    - "gigaam" - GigaAM v3 (рекомендуется для русского языка)
+    - "whisper" - Whisper (faster-whisper или openai-whisper)
 
     Args:
         call: Объект звонка
         audio_path: Путь к аудиофайлу (если None - определяется автоматически)
     """
-    logger.info(f"Начинаю транскрибацию звонка {call.id}: {call.filename}")
-    model = _get_whisper_model()
+    engine = settings.transcription_engine.lower()
+    logger.info(f"Начинаю транскрибацию звонка {call.id}: {call.filename} (движок: {engine})")
 
     # Определяем путь к аудио если не передан
     if audio_path is None:
@@ -139,6 +148,23 @@ def transcribe_call(call: Call, audio_path: Path | None = None) -> Dict[str, Any
     
     logger.info(f"Транскрибирую файл: {transcribe_path.absolute()}")
     try:
+        # Выбираем движок транскрибации
+        if engine == "gigaam" and GIGAAM_AVAILABLE:
+            # Используем GigaAM для русского языка
+            logger.info(f"Используется GigaAM модель '{settings.gigaam_model_name}'")
+            result = gigaam_transcribe_full(
+                transcribe_path,
+                model_name=settings.gigaam_model_name,
+                chunk_duration=settings.gigaam_chunk_duration
+            )
+            logger.info(f"Транскрипция GigaAM завершена для звонка {call.id}")
+            return result
+        elif engine == "gigaam" and not GIGAAM_AVAILABLE:
+            logger.warning("GigaAM недоступен, переключаюсь на Whisper")
+
+        # Whisper транскрибация
+        model = _get_whisper_model()
+
         if FASTER_WHISPER_AVAILABLE:
             # faster-whisper использует другой API
             logger.info("Используется faster-whisper для транскрипции")
