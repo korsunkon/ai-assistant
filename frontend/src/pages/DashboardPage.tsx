@@ -15,6 +15,7 @@ import {
   message,
   Progress,
   Empty,
+  Tooltip,
 } from "antd";
 import {
   WarningOutlined,
@@ -235,15 +236,41 @@ export const DashboardPage: React.FC = () => {
       title: "Описание",
       dataIndex: "description",
       key: "description",
-      ellipsis: true,
+      width: 300,
+      render: (text: string) => (
+        <Tooltip title={text} placement="topLeft" overlayStyle={{ maxWidth: 400 }}>
+          <Text style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            cursor: 'pointer'
+          }}>
+            {text}
+          </Text>
+        </Tooltip>
+      ),
     },
     {
       title: "Цитата",
       dataIndex: "quote",
       key: "quote",
-      width: 250,
-      ellipsis: true,
-      render: (text: string) => text ? <Text italic>"{text}"</Text> : "-",
+      width: 280,
+      render: (text: string) => text ? (
+        <Tooltip title={`"${text}"`} placement="topLeft" overlayStyle={{ maxWidth: 400 }}>
+          <Text italic style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            cursor: 'pointer'
+          }}>
+            "{text}"
+          </Text>
+        </Tooltip>
+      ) : "-",
     },
   ];
 
@@ -399,7 +426,7 @@ export const DashboardPage: React.FC = () => {
               dataSource={filteredIncidents}
               rowKey={(record, index) => `${record.file_id}-${index}`}
               pagination={{ pageSize: 20 }}
-              scroll={{ x: 1100 }}
+              scroll={{ x: 1300 }}
             />
           ) : (
             <Empty
