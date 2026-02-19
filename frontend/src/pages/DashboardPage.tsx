@@ -16,6 +16,9 @@ import {
   Progress,
   Empty,
   Tooltip,
+  Modal,
+  Timeline,
+  Divider,
 } from "antd";
 import {
   WarningOutlined,
@@ -25,6 +28,7 @@ import {
   FileTextOutlined,
   ClockCircleOutlined,
   DownloadOutlined,
+  SoundOutlined,
 } from "@ant-design/icons";
 import { api, DashboardData, Incident } from "../api/client";
 
@@ -37,6 +41,9 @@ export const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterSeverity, setFilterSeverity] = useState<string | null>(null);
+  const [transcriptModalVisible, setTranscriptModalVisible] = useState(false);
+  const [selectedTranscript, setSelectedTranscript] = useState<any>(null);
+  const [loadingTranscript, setLoadingTranscript] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -54,6 +61,20 @@ export const DashboardPage: React.FC = () => {
       message.error(error.response?.data?.detail || "Ошибка загрузки данных");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const showTranscript = async (callId: number) => {
+    setLoadingTranscript(true);
+    setTranscriptModalVisible(true);
+    try {
+      const transcript = await api.getCallTranscript(callId);
+      setSelectedTranscript(transcript);
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || "Ошибка загрузки транскрипта");
+      setTranscriptModalVisible(false);
+    } finally {
+      setLoadingTranscript(false);
     }
   };
 
@@ -272,6 +293,36 @@ export const DashboardPage: React.FC = () => {
         </Tooltip>
       ) : "-",
     },
+    {
+      title: "Действия",
+      key: "actions",
+      width: 200,
+      render: (_: any, record: Incident) => (
+        <Space>
+          <Button
+            type="primary"
+            size="small"
+            icon={<FileTextOutlined />}
+            onClick={() => showTranscript(record.file_id)}
+          >
+            Транскрипт
+          </Button>
+          {record.audio_path && (
+            <Tooltip title={record.audio_path}>
+              <Button
+                size="small"
+                icon={<SoundOutlined />}
+                onClick={() => {
+                  const path = record.audio_path.replace(/\//g, '\\');
+                  navigator.clipboard.writeText(path);
+                  message.success("Путь скопирован в буфер обмена");
+                }}
+              />
+            </Tooltip>
+          )}
+        </Space>
+      ),
+    },
   ];
 
   return (
@@ -426,7 +477,7 @@ export const DashboardPage: React.FC = () => {
               dataSource={filteredIncidents}
               rowKey={(record, index) => `${record.file_id}-${index}`}
               pagination={{ pageSize: 20 }}
-              scroll={{ x: 1300 }}
+              scroll={{ x: 1530 }}
             />
           ) : (
             <Empty
@@ -446,6 +497,88 @@ export const DashboardPage: React.FC = () => {
           )}
         </Card>
       </Space>
+
+      <Modal
+        title={<span><FileTextOutlined /> Транскрипция сессии</span>}
+        open={transcriptModalVisible}
+        onCancel={() => {
+          setTranscriptModalVisible(false);
+          setSelectedTranscript(null);
+        }}
+        footer={null}
+        width={900}
+        style={{ top: 20 }}
+        styles={{ body: { maxHeight: "80vh", overflowY: "auto" } }}
+      >
+        {loadingTranscript ? (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        ) : selectedTranscript ? (
+          <div>
+            {selectedTranscript.num_speakers && selectedTranscript.num_speakers > 0 && (
+              <Card size="small" style={{ marginBottom: 16, backgroundColor: "#e6f7ff" }}>
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <div>
+                    <Text strong>Количество говорящих: </Text>
+                    <Tag color="blue">{selectedTranscript.num_speakers}</Tag>
+                  </div>
+                  {selectedTranscript.speaker_roles && Object.keys(selectedTranscript.speaker_roles).length > 0 && (
+                    <div>
+                      <Text strong>Роли участников:</Text>
+                      <div style={{ marginTop: 8 }}>
+                        {Object.entries(selectedTranscript.speaker_roles).map(([speaker, role]: [string, any]) => (
+                          <Tag key={speaker} color="gold" style={{ marginBottom: 4 }}>
+                            {speaker}: {role}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Space>
+              </Card>
+            )}
+
+            <Card size="small" style={{ marginBottom: 16, backgroundColor: "#f5f5f5" }}>
+              <Text strong>Полный текст:</Text>
+              <Typography.Paragraph style={{ marginTop: 8 }}>{selectedTranscript.text}</Typography.Paragraph>
+            </Card>
+
+            <Divider>Детальная транскрипция с диаризацией</Divider>
+
+            <Timeline
+              items={selectedTranscript.segments?.map((segment: any, idx: number) => {
+                const speakerColors = ["blue", "green", "orange", "purple", "cyan", "magenta"];
+                const speakerId = segment.speaker_id ?? idx % 2;
+                const timelineColor = speakerColors[speakerId % speakerColors.length];
+
+                return {
+                  color: timelineColor,
+                  children: (
+                    <div key={idx}>
+                      <Space wrap>
+                        <Tag color="blue">{formatTime(segment.start)}</Tag>
+                        <Tag color="green">{formatTime(segment.end)}</Tag>
+                        {segment.speaker && (
+                          <Tag color={timelineColor}>{segment.speaker}</Tag>
+                        )}
+                        {segment.role && (
+                          <Tag color="gold">{segment.role}</Tag>
+                        )}
+                      </Space>
+                      <Typography.Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
+                        {segment.text}
+                      </Typography.Paragraph>
+                    </div>
+                  ),
+                };
+              })}
+            />
+          </div>
+        ) : (
+          <Text>Нет данных</Text>
+        )}
+      </Modal>
     </div>
   );
 };

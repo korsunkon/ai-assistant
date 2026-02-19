@@ -63,6 +63,7 @@ export interface AnalysisTemplate {
 export interface Incident {
   file_id: number;
   filename: string;
+  audio_path: string;
   start_time: number;
   end_time: number;
   type: string;

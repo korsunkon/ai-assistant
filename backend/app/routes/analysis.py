@@ -309,6 +309,7 @@ def get_analysis_dashboard(
             all_incidents.append({
                 "file_id": call.id,
                 "filename": call.filename,
+                "audio_path": call.original_path,
                 "start_time": incident.get("start_time", 0),
                 "end_time": incident.get("end_time", 0),
                 "type": inc_type,
